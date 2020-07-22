@@ -2,11 +2,18 @@
 
 #include "RCS620S.h"
 
+namespace{
+    struct rw_response_t{
+        uint8_t* data;
+        uint16_t len;
+    };
+}
+
 RCS620S::RCS620S(){}
 
 bool RCS620S::begin(HardwareSerial* uart){
-    this->timeout = 1000;
     this->serial = uart;
+    this->timeout = 1000;
 
     bool result;
     uint8_t res[RwResponseMax];
@@ -14,20 +21,20 @@ bool RCS620S::begin(HardwareSerial* uart){
 
     // ----- RF Configuration -----
     // Timings
-    result = rwCommand((const uint8_t*)"\xD4\x32\x02\x00\x00\x00", 6, res, &resLen);
-    if(!result || (resLen != 2) || (memcmp(res, "\xD5\x33", 2) != 0)){
+    result = rwCommand((uint8_t[]){0xD4, 0x32, 0x02, 0x00, 0x00, 0x00}, 6, res, &resLen);
+    if(!result || (resLen != 2) || (memcmp(res, (const uint8_t[]){0xD5, 0x33}, 2) != 0)){
         return false;
     }
 
     // Retries
-    result = rwCommand((const uint8_t*)"\xD4\x32\x05\x00\x00\x00", 6, res, &resLen);
-    if(!result || (resLen != 2) || (memcmp(res, "\xD5\x33", 2) != 0)){
+    result = rwCommand((uint8_t[]){0xD4, 0x32, 0x05, 0x00, 0x00, 0x00}, 6, res, &resLen);
+    if(!result || (resLen != 2) || (memcmp(res, (const uint8_t[]){0xD5, 0x33}, 2) != 0)){
         return false;
     }
 
     // Additional wait time (24ms)
-    result = rwCommand((const uint8_t*)"\xD4\x32\x81\xB7", 4, res, &resLen);
-    if(!result || (resLen != 2) || (memcmp(res, "\xD5\x33", 2) != 0)){
+    result = rwCommand((uint8_t[]){0xD4, 0x32, 0x81, 0xB7}, 4, res, &resLen);
+    if(!result || (resLen != 2) || (memcmp(res, (const uint8_t[]){0xD5, 0x33}, 2) != 0)){
         return false;
     }
 
@@ -41,12 +48,12 @@ bool RCS620S::polling(uint16_t code){
     uint16_t resLen;
 
     // In list passive target
-    memcpy(buf, "\xD4\x4A\x01\x01\x00\xFF\xFF\x00\x00", 9);
+    memcpy(buf, (const uint8_t[]){0xD4, 0x4A, 0x01, 0x01, 0x00, 0xFF, 0xFF, 0x00, 0x00}, 9);
     buf[5] = (uint8_t)((code >> 8) & 0xFF);
     buf[6] = (uint8_t)((code >> 0) & 0xFF);
 
     result = rwCommand(buf, 9, res, &resLen);
-    if(!result || (resLen != 22) || (memcmp(res, "\xD5\x4B\x01\x01\x12\x01", 6) != 0)){
+    if(!result || (resLen != 22) || (memcmp(res, (const uint8_t[]){0xD5, 0x4B, 0x01, 0x01, 0x12, 0x01}, 6) != 0)){
         return false;
     }
 
@@ -61,15 +68,15 @@ bool RCS620S::close(){
     uint8_t res[RwResponseMax];
     uint16_t resLen;
 
-    result = rwCommand((const uint8_t*)"\xD4\x32\x01\x00", 4, res, &resLen);
-    if(!result || (resLen != 2) || (memcmp(res, "\xD5\x33", 2) != 0)){
+    result = rwCommand((uint8_t[]){0xD4, 0x32, 0x01, 0x00}, 4, res, &resLen);
+    if(!result || (resLen != 2) || (memcmp(res, (const uint8_t[]){0xD5, 0x33}, 2) != 0)){
         return false;
     }
 
     return true;
 }
 
-bool RCS620S::cardCommand(const uint8_t* cmd, uint8_t cmdLen, uint8_t res[CardResponseMax], uint8_t* resLen){
+bool RCS620S::cardCommand(uint8_t* cmd, uint16_t cmdLen, uint8_t* res, uint16_t* resLen){
     bool result;
     uint16_t cmdTimeout;
     uint8_t buf[RwResponseMax];
@@ -101,7 +108,7 @@ bool RCS620S::cardCommand(const uint8_t* cmd, uint8_t cmdLen, uint8_t res[CardRe
     return true;
 }
 
-bool RCS620S::push(const uint8_t* data, uint8_t dataLen){
+bool RCS620S::push(uint8_t* data, uint16_t dataLen){
     bool result;
     uint8_t buf[CardResponseMax];
     uint8_t resLen;
@@ -133,11 +140,9 @@ bool RCS620S::push(const uint8_t* data, uint8_t dataLen){
     return true;
 }
 
-bool RCS620S::rwCommand(const uint8_t* cmd, uint16_t cmdLen, uint8_t res[RwResponseMax], uint16_t* resLen){
+bool RCS620S::rwCommand(uint8_t* cmd, uint16_t cmdLen, uint8_t* res, uint16_t* resLen){
     bool result;
     uint8_t buf[9];
-
-    this->serial->flush();
 
     uint8_t dcs = calcDcs(cmd, cmdLen);
 
@@ -162,25 +167,25 @@ bool RCS620S::rwCommand(const uint8_t* cmd, uint16_t cmdLen, uint8_t res[RwRespo
         serialWrite(buf, 8);
     }
 
-    serialWrite((uint8_t*)cmd, cmdLen);
+    serialWrite(cmd, cmdLen);
     buf[0] = dcs;
     buf[1] = 0x00;
     serialWrite(buf, 2);
 
     // Receive an ACK
     result = serialRead(buf, 6);
-    if(!result || (memcmp(buf, "\x00\x00\xFF\x00\xFF\x00", 6) != 0)){
-        serialCancel();
+    if(!result || (memcmp(buf, (const uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6) != 0)){
+        serialWrite((uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
         return false;
     }
 
     // Receive a response
     result = serialRead(buf, 5);
     if(!result){
-        serialCancel();
+            serialWrite((uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
         return false;
     }
-    else if(memcmp(buf, "\x00\x00\xFF", 3) != 0){
+    else if(memcmp(buf, (const uint8_t[]){0x00, 0x00, 0xFF}, 3) != 0){
         return false;
     }
 
@@ -207,7 +212,7 @@ bool RCS620S::rwCommand(const uint8_t* cmd, uint16_t cmdLen, uint8_t res[RwRespo
 
     result = serialRead(res, *resLen);
     if(!result){
-        serialCancel();
+        serialWrite((uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
         return false;
     }
 
@@ -215,26 +220,25 @@ bool RCS620S::rwCommand(const uint8_t* cmd, uint16_t cmdLen, uint8_t res[RwRespo
 
     result = serialRead(buf, 2);
     if(!result || (buf[0] != dcs) || (buf[1] != 0x00)){
-        serialCancel();
+        serialWrite((uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
         return false;
     }
 
     return true;
 }
 
-uint8_t RCS620S::calcDcs(const uint8_t* data, uint16_t dataLen){
+uint8_t RCS620S::calcDcs(uint8_t* data, uint16_t dataLen){
     uint8_t sum = 0;
 
     for(uint16_t i = 0; i < dataLen; i++){
         sum += data[i];
     }
 
-    return (uint8_t)-(sum & 0xFF);
+    return -(sum & 0xFF);
 }
 
 bool RCS620S::serialWrite(uint8_t* data, uint16_t dataLen){
     this->serial->write(data, dataLen);
-
     return true;
 }
 
@@ -247,16 +251,10 @@ bool RCS620S::serialRead(uint8_t* data, uint16_t dataLen){
             return false;
         }
 
-        if(this->serial->available() > 0){
+        if(this->serial->available()){
             data[bytes++] = this->serial->read();
         }
     }
 
     return true;
-}
-
-void RCS620S::serialCancel(){
-    serialWrite((uint8_t*)"\x00\x00\xFF\x00\xFF\x00", 6);
-    delay(1);
-    this->serial->flush();
 }

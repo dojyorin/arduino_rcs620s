@@ -2,7 +2,7 @@
 
 #include "RCS620S.h"
 
-RCS620S nfc;
+RCS620S felica;
 
 void setup(){
     Serial.begin(115200);
@@ -12,13 +12,13 @@ void setup(){
     Serial1.begin(115200);
     while(!Serial1);
 
-    nfc.begin(&Serial1);
+    felica.begin(&Serial1);
 }
 
 void loop(){
-    nfc.polling();
+    felica.polling();
 
-    nfc.close();
+    felica.close();
 
     delay(1000);
 }
