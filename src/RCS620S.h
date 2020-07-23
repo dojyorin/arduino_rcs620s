@@ -1,33 +1,54 @@
-#ifndef RCS620S_H_
-#define RCS620S_H_
+#ifndef RCS620S_Header
+#define RCS620S_Header
 
-#define CardResponseMax 254
-#define RwResponseMax 265
+#include "inttypes.h"
+#include "string.h"
+
+#define RCS620S_MAX_CARD_RESPONSE_LEN    254
+#define RCS620S_MAX_RW_RESPONSE_LEN      265
 
 class RCS620S{
 public:
-    uint32_t timeout;
-    uint8_t idm[8];
-    uint8_t pmm[8];
-
     RCS620S();
 
-    bool begin(HardwareSerial* uart);
+    int initDevice();
+    int polling(uint16_t systemCode = 0xffff);
+    int cardCommand(
+        const uint8_t* command,
+        uint8_t commandLen,
+        uint8_t response[RCS620S_MAX_CARD_RESPONSE_LEN],
+        uint8_t* responseLen);
+    int rfOff();
 
-    bool polling(uint16_t code = 0xFFFF);
-    bool close();
-
-    bool cardCommand(uint8_t* cmd, uint16_t cmdLen, uint8_t* res, uint16_t* resLen);
-    bool push(uint8_t* data, uint16_t dataLen);
+    int push(
+        const uint8_t* data,
+        uint8_t dataLen);
 
 private:
-    HardwareSerial* serial;
+    int rwCommand(
+        const uint8_t* command,
+        uint16_t commandLen,
+        uint8_t response[RCS620S_MAX_RW_RESPONSE_LEN],
+        uint16_t* responseLen);
+    void cancel();
+    uint8_t calcDCS(
+        const uint8_t* data,
+        uint16_t len);
 
-    bool serialWrite(uint8_t* data, uint16_t dataLen);
-    bool serialRead(uint8_t* data, uint16_t dataLen);
+    void writeSerial(
+        const uint8_t* data,
+        uint16_t len);
+    int readSerial(
+        uint8_t* data,
+        uint16_t len);
+    void flushSerial();
 
-    bool rwCommand(uint8_t* cmd, uint16_t cmdLen, uint8_t* res, uint16_t* resLen);
-    uint8_t calcDcs(uint8_t* data, uint16_t dataLen);
+    int checkTimeout(unsigned long t0);
+
+public:
+    unsigned long timeout;
+    uint8_t idm[8];
+    uint8_t pmm[8];
 };
 
 #endif
