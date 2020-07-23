@@ -1,54 +1,34 @@
 #ifndef RCS620S_Header
 #define RCS620S_Header
 
-#include "inttypes.h"
-#include "string.h"
-
-#define RCS620S_MAX_CARD_RESPONSE_LEN    254
-#define RCS620S_MAX_RW_RESPONSE_LEN      265
+#include "Arduino.h"
 
 class RCS620S{
 public:
-    RCS620S();
+    static const size_t responseLengthMax = 265;
+    static const size_t responseLengthOffset = 11;
 
-    int initDevice();
-    int polling(uint16_t systemCode = 0xffff);
-    int cardCommand(
-        const uint8_t* command,
-        uint8_t commandLen,
-        uint8_t response[RCS620S_MAX_CARD_RESPONSE_LEN],
-        uint8_t* responseLen);
-    int rfOff();
+    uint8_t idm[8] = {0};
+    uint8_t pmm[8] = {0};
 
-    int push(
-        const uint8_t* data,
-        uint8_t dataLen);
+
+    RCS620S(Uart* uart);
+
+    bool begin(uint16_t timeout);
+    bool rfOff();
+    bool polling();
+    bool push(const uint8_t *data, size_t dataLength);
+    size_t cardCommand(const uint8_t *command, size_t commandLength, uint8_t* response);
 
 private:
-    int rwCommand(
-        const uint8_t* command,
-        uint16_t commandLen,
-        uint8_t response[RCS620S_MAX_RW_RESPONSE_LEN],
-        uint16_t* responseLen);
-    void cancel();
-    uint8_t calcDCS(
-        const uint8_t* data,
-        uint16_t len);
+    Uart* io = nullptr;
+    uint16_t timeout = 0;
 
-    void writeSerial(
-        const uint8_t* data,
-        uint16_t len);
-    int readSerial(
-        uint8_t* data,
-        uint16_t len);
-    void flushSerial();
+    static uint8_t calcDCS(const uint8_t *data, size_t dataLength);
 
-    int checkTimeout(unsigned long t0);
-
-public:
-    unsigned long timeout;
-    uint8_t idm[8];
-    uint8_t pmm[8];
+    size_t rwCommand(const uint8_t *command, size_t commandLength, uint8_t* response);
+    bool writeSerial(const uint8_t *data, size_t dataLength);
+    bool readSerial(uint8_t *data, size_t dataLength);
 };
 
 #endif

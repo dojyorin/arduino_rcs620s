@@ -1,16 +1,12 @@
 # RC-S620S FeliCa Reader/Writer for Arduino
 
-**WIP!! 作業中のため動作未確認となります**
+**Warning! ベータ版のため一部動作未確認です**
 
 ArduinoからRC-S620/Sモジュールを操作するためのライブラリです。
 
-# 仕様
-## クラス
-### `RCS620S`
+# API
+## `RCS620S(Uart* uart)`
 
-```arduino
-RCS620S nfc;
-```
 
 ## プロパティ
 ### `uint32_t timeout`
@@ -18,10 +14,10 @@ RC-S620/S との通信のタイムアウトをミリ秒単位で指定します�
 
 - デフォルト値: `1000`
 
-### `uint8_t idm[8]`
+## `uint8_t idm[8]`
 捕捉したカードのIDmです。
 
-### `uint8_t pmm[8]`
+## `uint8_t pmm[8]`
 捕捉したカードのPMmです。
 
 ## メソッド

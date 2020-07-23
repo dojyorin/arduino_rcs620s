@@ -1,336 +1,212 @@
 #include "RCS620S.h"
 
-RCS620S::RCS620S(){}
+RCS620S::RCS620S(Uart* uart):io(uart){}
 
-int RCS620S::initDevice()
-{
-    int ret;
-    uint8_t response[RCS620S_MAX_RW_RESPONSE_LEN];
-    uint16_t responseLen;
+bool RCS620S::begin(uint16_t timeout){
+    this->io->begin(115200);
+    while(!this->io);
 
-    /* RFConfiguration (various timings) */
-    ret = rwCommand((const uint8_t *)"\xd4\x32\x02\x00\x00\x00", 6,
-                    response, &responseLen);
-    if (!ret || (responseLen != 2) ||
-        (memcmp(response, "\xd5\x33", 2) != 0))
-    {
-        return 0;
+    this->timeout = timeout;
+
+    uint8_t response[responseLengthMax];
+
+    if(rwCommand((const uint8_t[]){0xD4, 0x32, 0x02, 0x00, 0x00, 0x00}, 6, response) != 2 || !!memcmp(response, (const uint8_t[]){0xD5, 0x33}, 2)){
+        return false;
     }
 
-    /* RFConfiguration (max retries) */
-    ret = rwCommand((const uint8_t *)"\xd4\x32\x05\x00\x00\x00", 6,
-                    response, &responseLen);
-    if (!ret || (responseLen != 2) ||
-        (memcmp(response, "\xd5\x33", 2) != 0))
-    {
-        return 0;
+    if(rwCommand((const uint8_t[]){0xD4, 0x32, 0x05, 0x00, 0x00, 0x00}, 6, response) != 2 || !!memcmp(response, (const uint8_t[]){0xD5, 0x33}, 2)){
+        return false;
     }
 
-    /* RFConfiguration (additional wait time = 24ms) */
-    ret = rwCommand((const uint8_t *)"\xd4\x32\x81\xb7", 4,
-                    response, &responseLen);
-    if (!ret || (responseLen != 2) ||
-        (memcmp(response, "\xd5\x33", 2) != 0))
-    {
-        return 0;
+    if(rwCommand((const uint8_t[]){0xD4, 0x32, 0x81, 0xB7}, 4, response) != 2 || !!memcmp(response, (const uint8_t[]){0xD5, 0x33}, 2)){
+        return false;
     }
 
-    return 1;
+    return true;
 }
 
-int RCS620S::polling(uint16_t systemCode)
-{
-    int ret;
-    uint8_t buf[9];
-    uint8_t response[RCS620S_MAX_RW_RESPONSE_LEN];
-    uint16_t responseLen;
+bool RCS620S::polling(){
+    uint8_t response[responseLengthMax];
 
-    /* InListPassiveTarget */
-    memcpy(buf, "\xd4\x4a\x01\x01\x00\xff\xff\x00\x00", 9);
-    buf[5] = (uint8_t)((systemCode >> 8) & 0xff);
-    buf[6] = (uint8_t)((systemCode >> 0) & 0xff);
-
-    ret = rwCommand(buf, 9, response, &responseLen);
-    if (!ret || (responseLen != 22) ||
-        (memcmp(response, "\xd5\x4b\x01\x01\x12\x01", 6) != 0))
-    {
-        return 0;
+    if(rwCommand((const uint8_t[]){0xD4, 0x4A, 0x01, 0x01, 0x00, 0xFF, 0xFF, 0x00, 0x00}, 9, response) != 22 || !!memcmp(response, (const uint8_t[]){0xD5, 0x4B, 0x01, 0x01, 0x12, 0x01}, 6)){
+        return false;
     }
 
     memcpy(this->idm, response + 6, 8);
     memcpy(this->pmm, response + 14, 8);
 
-    return 1;
+    return true;
 }
 
-int RCS620S::cardCommand(
-    const uint8_t *command,
-    uint8_t commandLen,
-    uint8_t response[RCS620S_MAX_CARD_RESPONSE_LEN],
-    uint8_t *responseLen)
-{
-    int ret;
-    uint16_t commandTimeout;
-    uint8_t buf[RCS620S_MAX_RW_RESPONSE_LEN];
-    uint16_t len;
+size_t RCS620S::cardCommand(const uint8_t *command, size_t commandLength, uint8_t* response){
+    uint8_t bufferTx[responseLengthMax] = {0};
+    uint8_t bufferRx[responseLengthMax] = {0};
+    size_t responseLength = 0;
 
-    if (this->timeout >= (0x10000 / 2))
-    {
-        commandTimeout = 0xffff;
-    }
-    else
-    {
-        commandTimeout = (uint16_t)(this->timeout * 2);
-    }
+    bufferTx[0] = 0xD4;
+    bufferTx[1] = 0xA0;
+    bufferTx[2] = this->timeout & 0xFF;
+    bufferTx[3] = (this->timeout >> 8) & 0xFF;
+    bufferTx[4] = commandLength + 1;
+    memcpy(bufferTx + 5, command, commandLength);
 
-    /* CommunicateThruEX */
-    buf[0] = 0xd4;
-    buf[1] = 0xa0;
-    buf[2] = (uint8_t)((commandTimeout >> 0) & 0xff);
-    buf[3] = (uint8_t)((commandTimeout >> 8) & 0xff);
-    buf[4] = (uint8_t)(commandLen + 1);
-    memcpy(buf + 5, command, commandLen);
-
-    ret = rwCommand(buf, 5 + commandLen, buf, &len);
-    if (!ret || (len < 4) ||
-        (buf[0] != 0xd5) || (buf[1] != 0xa1) || (buf[2] != 0x00) ||
-        (len != (3 + buf[3])))
-    {
+    if(rwCommand(bufferTx, commandLength + 5, bufferRx) < (3 + bufferRx[3]) || bufferRx[0] != 0xD5 || bufferRx[1] != 0xA1 || bufferRx[2] != 0x00){
         return 0;
     }
 
-    *responseLen = (uint8_t)(buf[3] - 1);
-    memcpy(response, buf + 4, *responseLen);
+    responseLength = bufferRx[3] - 1;
+    memcpy(response, bufferRx + 4, responseLength);
 
-    return 1;
+    return responseLength;
 }
 
-int RCS620S::rfOff()
-{
-    int ret;
-    uint8_t response[RCS620S_MAX_RW_RESPONSE_LEN];
-    uint16_t responseLen;
+bool RCS620S::rfOff(){
+    uint8_t response[responseLengthMax] = {0};
 
-    /* RFConfiguration (RF field) */
-    ret = rwCommand((const uint8_t *)"\xd4\x32\x01\x00", 4,
-                    response, &responseLen);
-    if (!ret || (responseLen != 2) ||
-        (memcmp(response, "\xd5\x33", 2) != 0))
-    {
-        return 0;
-    }
-
-    return 1;
+    return rwCommand((const uint8_t[]){0xD4, 0x32, 0x01, 0x00}, 4, response) != 2 || !!memcmp(response, (const uint8_t[]){0xD5, 0x33}, 2);
 }
 
-int RCS620S::push(
-    const uint8_t *data,
-    uint8_t dataLen)
-{
-    int ret;
-    uint8_t buf[RCS620S_MAX_CARD_RESPONSE_LEN];
-    uint8_t responseLen;
+bool RCS620S::push(const uint8_t* data, size_t dataLength){
+    uint8_t bufferTx[responseLengthMax - responseLengthOffset] = {0};
+    uint8_t bufferRx[responseLengthMax - responseLengthOffset] = {0};
 
-    if (dataLen > 224)
-    {
-        return 0;
+    if(dataLength > 224){
+        return false;
     }
 
-    /* Push */
-    buf[0] = 0xb0;
-    memcpy(buf + 1, this->idm, 8);
-    buf[9] = dataLen;
-    memcpy(buf + 10, data, dataLen);
+    bufferTx[0] = 0xB0;
+    memcpy(bufferTx + 1, this->idm, 8);
+    bufferTx[9] = dataLength;
+    memcpy(bufferTx + 10, data, dataLength);
 
-    ret = cardCommand(buf, 10 + dataLen, buf, &responseLen);
-    if (!ret || (responseLen != 10) || (buf[0] != 0xb1) ||
-        (memcmp(buf + 1, this->idm, 8) != 0) || (buf[9] != dataLen))
-    {
-        return 0;
+    if(cardCommand(bufferTx, dataLength + 10, bufferRx) != 10 || bufferRx[0] != 0xB1 || !!memcmp(bufferRx + 1, this->idm, 8) || bufferRx[9] != dataLength){
+        return false;
     }
 
-    buf[0] = 0xa4;
-    memcpy(buf + 1, this->idm, 8);
-    buf[9] = 0x00;
+    memset(bufferTx, 0, sizeof(bufferTx));
+    bufferTx[0] = 0xA4;
+    memcpy(bufferTx + 1, this->idm, 8);
+    bufferTx[9] = 0x00;
 
-    ret = cardCommand(buf, 10, buf, &responseLen);
-    if (!ret || (responseLen != 10) || (buf[0] != 0xa5) ||
-        (memcmp(buf + 1, this->idm, 8) != 0) || (buf[9] != 0x00))
-    {
-        return 0;
+    memset(bufferRx, 0, sizeof(bufferRx));
+    if(cardCommand(bufferTx, 10, bufferRx) != 10 || bufferRx[0] != 0xA5 || !!memcmp(bufferRx + 1, this->idm, 8) || bufferRx[9] != 0x00){
+        return false;
     }
 
-    delay(1000);
-
-    return 1;
+    return true;
 }
 
-int RCS620S::rwCommand(
-    const uint8_t *command,
-    uint16_t commandLen,
-    uint8_t response[RCS620S_MAX_RW_RESPONSE_LEN],
-    uint16_t *responseLen)
-{
-    int ret;
-    uint8_t buf[9];
-
-    flushSerial();
-
-    uint8_t dcs = calcDCS(command, commandLen);
-
-    /* transmit the command */
-    buf[0] = 0x00;
-    buf[1] = 0x00;
-    buf[2] = 0xff;
-    if (commandLen <= 255)
-    {
-        /* normal frame */
-        buf[3] = commandLen;
-        buf[4] = (uint8_t)-buf[3];
-        writeSerial(buf, 5);
-    }
-    else
-    {
-        /* extended frame */
-        buf[3] = 0xff;
-        buf[4] = 0xff;
-        buf[5] = (uint8_t)((commandLen >> 8) & 0xff);
-        buf[6] = (uint8_t)((commandLen >> 0) & 0xff);
-        buf[7] = (uint8_t) - (buf[5] + buf[6]);
-        writeSerial(buf, 8);
-    }
-    writeSerial(command, commandLen);
-    buf[0] = dcs;
-    buf[1] = 0x00;
-    writeSerial(buf, 2);
-
-    /* receive an ACK */
-    ret = readSerial(buf, 6);
-    if (!ret || (memcmp(buf, "\x00\x00\xff\x00\xff\x00", 6) != 0))
-    {
-        cancel();
-        return 0;
-    }
-
-    /* receive a response */
-    ret = readSerial(buf, 5);
-    if (!ret)
-    {
-        cancel();
-        return 0;
-    }
-    else if (memcmp(buf, "\x00\x00\xff", 3) != 0)
-    {
-        return 0;
-    }
-    if ((buf[3] == 0xff) && (buf[4] == 0xff))
-    {
-        ret = readSerial(buf + 5, 3);
-        if (!ret || (((buf[5] + buf[6] + buf[7]) & 0xff) != 0))
-        {
-            return 0;
-        }
-        *responseLen = (((uint16_t)buf[5] << 8) |
-                        ((uint16_t)buf[6] << 0));
-    }
-    else
-    {
-        if (((buf[3] + buf[4]) & 0xff) != 0)
-        {
-            return 0;
-        }
-        *responseLen = buf[3];
-    }
-    if (*responseLen > RCS620S_MAX_RW_RESPONSE_LEN)
-    {
-        return 0;
-    }
-
-    ret = readSerial(response, *responseLen);
-    if (!ret)
-    {
-        cancel();
-        return 0;
-    }
-
-    dcs = calcDCS(response, *responseLen);
-
-    ret = readSerial(buf, 2);
-    if (!ret || (buf[0] != dcs) || (buf[1] != 0x00))
-    {
-        cancel();
-        return 0;
-    }
-
-    return 1;
-}
-
-void RCS620S::cancel()
-{
-    /* transmit an ACK */
-    writeSerial((const uint8_t *)"\x00\x00\xff\x00\xff\x00", 6);
-    delay(1);
-    flushSerial();
-}
-
-uint8_t RCS620S::calcDCS(
-    const uint8_t *data,
-    uint16_t len)
-{
+uint8_t RCS620S::calcDCS(const uint8_t* data, size_t dataLength){
     uint8_t sum = 0;
 
-    for (uint16_t i = 0; i < len; i++)
-    {
-        sum += data[i];
+    while(dataLength--){
+        sum += *data++;
     }
 
-    return (uint8_t) - (sum & 0xff);
+    return -(sum & 0xFF);
 }
 
-void RCS620S::writeSerial(
-    const uint8_t *data,
-    uint16_t len)
-{
-    Serial.write(data, len);
-}
+size_t RCS620S::rwCommand(const uint8_t *command, size_t commandLength, uint8_t* response){
+    uint8_t bufferTx[8] = {0};
+    uint8_t bufferRx[6] = {0};
+    size_t responseLength = 0;
 
-int RCS620S::readSerial(
-    uint8_t *data,
-    uint16_t len)
-{
-    uint16_t nread = 0;
-    unsigned long t0 = millis();
+    bufferTx[0] = 0x00;
+    bufferTx[1] = 0x00;
+    bufferTx[2] = 0xFF;
 
-    while (nread < len)
-    {
-        if (checkTimeout(t0))
-        {
+    if(commandLength <= 0xFF){
+        bufferTx[3] = commandLength;
+        bufferTx[4] = -bufferTx[3];
+
+        writeSerial(bufferTx, 5);
+    }
+    else{
+        bufferTx[3] = 0xFF;
+        bufferTx[4] = 0xFF;
+        bufferTx[5] = (commandLength >> 8) & 0xFF;
+        bufferTx[6] = commandLength & 0xFF;
+        bufferTx[7] = -(bufferTx[5] + bufferTx[6]);
+
+        writeSerial(bufferTx, 8);
+    }
+
+    writeSerial(command, commandLength);
+
+    memset(bufferTx, 0, sizeof(bufferTx));
+    bufferTx[0] = calcDCS(command, commandLength);
+    bufferTx[1] = 0x00;
+
+    writeSerial(bufferTx, 2);
+
+    if(!readSerial(bufferRx, 6) || !!memcmp(bufferRx, (const uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6)){
+        writeSerial((const uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
+        return 0;
+    }
+
+    memset(bufferRx, 0, sizeof(bufferRx));
+    if(!readSerial(bufferRx, 5)){
+        writeSerial((const uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
+        return 0;
+    }
+    else if(!!memcmp(bufferRx, (const uint8_t[]){0x00, 0x00, 0xFF}, 3)){
+        return 0;
+    }
+
+    if(bufferRx[3] == 0xFF && bufferRx[4] == 0xFF){
+        memset(bufferRx, 0, sizeof(bufferRx));
+        if(!readSerial(bufferRx, 3) || !!((bufferRx[0] + bufferRx[1] + bufferRx[2]) & 0xFF)){
             return 0;
         }
 
-        if (Serial.available() > 0)
-        {
-            data[nread] = Serial.read();
-            nread++;
+        responseLength = (bufferRx[0] << 8) | bufferRx[1];
+    }
+    else{
+        if(!!((bufferRx[3] + bufferRx[4]) & 0xFF)){
+            return 0;
+        }
+
+        responseLength = bufferRx[3];
+    }
+
+    if(responseLength > responseLengthMax){
+        return 0;
+    }
+
+    if(!readSerial(response, responseLength)){
+        writeSerial((const uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
+        return 0;
+    }
+
+    memset(bufferRx, 0, sizeof(bufferRx));
+    if(!readSerial(bufferRx, 2) || bufferRx[0] != calcDCS(response, responseLength) || bufferRx[1] != 0x00){
+        writeSerial((const uint8_t[]){0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}, 6);
+        return 0;
+    }
+
+    return responseLength;
+}
+
+bool RCS620S::writeSerial(const uint8_t *data, size_t dataLength){
+    size_t bytes = this->io->write(data, dataLength);
+    this->io->flush();
+
+    return bytes == dataLength;
+}
+
+bool RCS620S::readSerial(uint8_t *data, size_t dataLength){
+    size_t bytes = 0;
+    uint32_t t0 = millis();
+
+    while(bytes < dataLength){
+        if((millis() - t0) >= this->timeout){
+            return false;
+        }
+
+        if(this->io->available() > 0){
+            data[bytes++] = this->io->read();
         }
     }
 
-    return 1;
-}
-
-void RCS620S::flushSerial()
-{
-    Serial.flush();
-}
-
-int RCS620S::checkTimeout(unsigned long t0)
-{
-    unsigned long t = millis();
-
-    if ((t - t0) >= this->timeout)
-    {
-        return 1;
-    }
-
-    return 0;
+    return true;
 }
